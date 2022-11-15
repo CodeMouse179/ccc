@@ -1,7 +1,7 @@
 ﻿//     +--------------------------------------------------------------------------------+
-//     |                                  String v1.13.1                                |
+//     |                                  String v1.16.0                                |
 //     |  Introduction : System.String in C++                                           |
-//     |  Modified Date : 2022/11/13                                                    |
+//     |  Modified Date : 2022/11/15                                                    |
 //     |  License : MIT                                                                 |
 //     |  Source Code : https://github.com/CodeMouse179/String                          |
 //     |  Readme : https://github.com/CodeMouse179/String/blob/main/README.md           |
@@ -18,13 +18,16 @@
 //Versioning refer to Semantic Versioning 2.0.0 : https://semver.org/
 
 #define SYSTEM_STRING_VERSION_MAJOR 1
-#define SYSTEM_STRING_VERSION_MINOR 13
-#define SYSTEM_STRING_VERSION_PATCH 1
+#define SYSTEM_STRING_VERSION_MINOR 16
+#define SYSTEM_STRING_VERSION_PATCH 0
 #define SYSTEM_STRING_VERSION (SYSTEM_STRING_VERSION_MAJOR << 16 | SYSTEM_STRING_VERSION_MINOR << 8 | SYSTEM_STRING_VERSION_PATCH)
-#define SYSTEM_STRING_VERSION_STRING "1.13.1"
+#define SYSTEM_STRING_VERSION_STRING "1.16.0"
 
 //Windows Platform:
 #ifdef _WIN32
+#define SYSTEM_WINDOWS 1
+#endif
+#ifdef WIN32
 #define SYSTEM_WINDOWS 1
 #endif
 
@@ -35,6 +38,14 @@
 
 //Windows Headers:
 #ifdef SYSTEM_WINDOWS
+//Enable UNICODE:
+#ifndef UNICODE
+#define UNICODE
+#endif
+//Enable _UNICODE:
+#ifndef _UNICODE
+#define _UNICODE
+#endif
 #include <Windows.h>
 //Disable warnings for MSVC++ 20:
 #ifdef _MSC_VER
@@ -44,7 +55,8 @@
 
 //Linux Headers:
 #ifdef SYSTEM_LINUX
-#include <locale> //std::wstring_convert
+#include <locale>       //std::wstring_convert
+#include <unistd.h>     //read, write, STDIN_FILENO, STDOUT_FILENO
 #endif
 
 //CXX version define:
@@ -79,12 +91,12 @@
 #endif
 
 //C++ Headers:
-#include <string> //std::string, std::wstring, std::basic_string
-#include <algorithm> //std::equal
-#include <cctype> //std::tolower
-#include <sstream> //std::basic_ostringstream
-#include <vector> //std::vector
-#include <codecvt> //wstring_convert, codecvt_utf8, codecvt_utf16, codecvt_utf8_utf16
+#include <string>       //std::string, std::wstring, std::basic_string
+#include <algorithm>    //std::equal
+#include <cctype>       //std::tolower
+#include <sstream>      //std::basic_ostringstream
+#include <vector>       //std::vector
+#include <codecvt>      //wstring_convert, codecvt_utf8, codecvt_utf16, codecvt_utf8_utf16
 
 //Ordinary character System::String class
 #define StringA System::String<char>
@@ -164,6 +176,10 @@
 
 #ifndef FALSE_STRING
 #define FALSE_STRING "False"
+#endif
+
+#ifndef SYSTEM_STRING_INPUT_BUFFER_SIZE
+#define SYSTEM_STRING_INPUT_BUFFER_SIZE 1024
 #endif
 
 namespace System
@@ -837,6 +853,26 @@ namespace System
 #endif
         }
 
+        static std::u16string WstringToU16string(const std::wstring& s)
+        {
+#ifdef SYSTEM_WINDOWS
+            std::u16string str(reinterpret_cast<const char16_t*>(s.c_str()));
+            return str;
+#else
+            return String::To_UTF16(s);
+#endif
+        }
+
+        static std::wstring U16stringToWstring(const std::u16string& s)
+        {
+#ifdef SYSTEM_WINDOWS
+            std::wstring str(reinterpret_cast<const wchar_t*>(s.c_str()));
+            return str;
+#else
+            return String::To_Wstring(s);
+#endif
+        }
+
     public: //Extra Convert Function 2:
         static std::string To_UTF8(const std::u16string& s)
         {
@@ -900,6 +936,16 @@ namespace System
         {
             std::wstring_convert<std::codecvt_utf8<wchar_t>, wchar_t> conv;
             return conv.from_bytes(s);
+        }
+
+        static std::wstring To_Wstring(const std::u16string& s)
+        {
+            return String::To_Wstring(String::To_UTF8(s));
+        }
+
+        static std::wstring To_Wstring(const std::u32string& s)
+        {
+            return String::To_Wstring(String::To_UTF8(s));
         }
 
     public: //Extra Convert Function 4:
@@ -1293,6 +1339,114 @@ namespace System
                 s.push_back((T)str[i]);
             }
             return s;
+        }
+
+        static bool IsNumeric(const std::basic_string<T>& s)
+        {
+            if (s.empty()) return false;
+            for (int i = 0; i < s.size(); i++)
+            {
+                //'0' = 48, '9' = 57
+                if (s[i] < (T)'0' || s[i] > (T)'9')
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        static bool IsEmptyOrWhiteSpace(const std::basic_string<T>& s)
+        {
+            if (s.empty()) return true;
+            for (int i = 0; i < s.size(); i++)
+            {
+                if (s[i] != (T)' ') return false;
+            }
+            return true;
+        }
+#endif
+
+#ifndef SYSTEM_STRING_ONLY
+    public: //Console Function 1:
+        //return code point of next read character.
+        static int Read()
+        {
+            std::string s = String::ReadLine();
+            auto arr = String::UTF8ToCharArray(s);
+            if (arr.size() > 0)
+                return arr[0].codePoint;
+            else
+                return -1;
+        }
+
+        //return UTF-8 string.
+        static std::string ReadLine()
+        {
+            std::string str;
+#ifdef SYSTEM_WINDOWS
+            HANDLE stdInputHandle = GetStdHandle(STD_INPUT_HANDLE);
+            if (stdInputHandle == INVALID_HANDLE_VALUE) return str;
+            DWORD read;
+#if SYSTEM_STRING_INPUT_BUFFER_SIZE >= 1024
+            const int bufferSize = SYSTEM_STRING_INPUT_BUFFER_SIZE;
+#else
+            const int bufferSize = 1024;    //minimum size
+#endif
+            wchar_t buffer[bufferSize + 1]; //bufferSize + 1 because we need '\0' at end of this string.
+            buffer[bufferSize] = 0;         //add '\0' at the end.
+            BOOL success = ReadConsoleW(stdInputHandle, buffer, bufferSize, &read, NULL);
+            if (success)
+            {
+                if (read >= 2)
+                    buffer[read - 2] = 0;   //remove \r\n
+                str = String::WstringToString(std::wstring(buffer), System::StringEncoding::UTF8);
+            }
+#endif
+#ifdef SYSTEM_LINUX
+#if SYSTEM_STRING_INPUT_BUFFER_SIZE >= 2048
+            const int bufferSize = SYSTEM_STRING_INPUT_BUFFER_SIZE;
+#else
+            const int bufferSize = 2048;    //minimum size
+#endif
+            char buffer[bufferSize + 1];    //bufferSize + 1 because we need '\0' at end of this string.
+            buffer[bufferSize] = 0;         //add '\0' at the end.
+            ssize_t ret = read(STDIN_FILENO, buffer, bufferSize);
+            if (ret != -1)
+            {
+                if (ret >= 1)
+                    buffer[ret - 1] = 0;    //remove \n
+                str = buffer;
+            }
+#endif
+            return str;
+        }
+
+        //std::string must be UTF-8 Encoding.
+        static bool Write(const std::string& s)
+        {
+            if (!String::IsValidUTF8(s))
+            {
+                return false;
+            }
+#ifdef SYSTEM_WINDOWS
+            HANDLE stdOutputHandle = GetStdHandle(STD_OUTPUT_HANDLE);
+            if (stdOutputHandle == INVALID_HANDLE_VALUE) return false;
+            DWORD written;
+            std::wstring str = String::StringToWstring(s, StringEncoding::UTF8);
+            BOOL success = WriteConsoleW(stdOutputHandle, str.c_str(), str.size(), &written, NULL);
+            return success;
+#endif
+#ifdef SYSTEM_LINUX
+            ssize_t ret = write(STDOUT_FILENO, s.c_str(), s.size());
+            return ret != -1;
+#endif
+            return false;
+        }
+
+        //std::string must be UTF-8 Encoding.
+        static bool WriteLine(const std::string& s)
+        {
+            return String::Write(s + "\n");
         }
 #endif
 
